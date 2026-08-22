@@ -14,7 +14,7 @@ from typing import Optional
 # ---------------------------------------------------------------------------
 
 TOKEN_LIMIT = 400          # approximate token budget per chunk
-MERGE_THRESHOLD = 200      # chunks below this size may be merged with the next
+MERGE_THRESHOLD = 50       # chunks below this size may be merged with adjacent tiny chunks
 SLIDING_WINDOW_TOKENS = 350
 SLIDING_OVERLAP_TOKENS = 50
 
@@ -206,10 +206,18 @@ def _ast_chunks_from_nodes(nodes: list, content_bytes: bytes, chunkable: set[str
         symbol_name = _get_symbol_name(node)
 
         if tokens > TOKEN_LIMIT:
-            # Oversized: try to split at chunkable children (e.g. methods inside a class)
-            chunkable_children = [
-                c for c in node.children if c.type in chunkable and not c.is_missing
-            ]
+            # Oversized: try to split at chunkable children (e.g. methods inside a class body or block)
+            chunkable_children = []
+            queue = list(node.children)
+            while queue:
+                child = queue.pop(0)
+                if child.is_missing:
+                    continue
+                if child.type in chunkable:
+                    chunkable_children.append(child)
+                elif child.type in {"block", "class_body", "declaration_list", "statement_block", "body"}:
+                    queue.extend(child.children)
+
             if chunkable_children:
                 raw.extend(_ast_chunks_from_nodes(chunkable_children, content_bytes, chunkable))
                 continue
@@ -226,18 +234,25 @@ def _ast_chunks_from_nodes(nodes: list, content_bytes: bytes, chunkable: set[str
     # When two small adjacent chunks are combined the result spans multiple
     # symbols, so we clear symbol_name (the retrieval layer can still do
     # keyword/embedding search over the merged text).
+    TINY_SYMBOL_THRESHOLD = 8
     merged: list[dict] = []
     for chunk in raw:
+        prev_tokens = _estimate_tokens(merged[-1]["content"]) if merged else 0
+        curr_tokens = _estimate_tokens(chunk["content"])
+
         if (
             merged
-            and _estimate_tokens(merged[-1]["content"]) < MERGE_THRESHOLD
-            and _estimate_tokens(merged[-1]["content"]) + _estimate_tokens(chunk["content"]) <= TOKEN_LIMIT
+            and (merged[-1]["symbol_name"] is None or chunk["symbol_name"] is None or prev_tokens < TINY_SYMBOL_THRESHOLD or curr_tokens < TINY_SYMBOL_THRESHOLD)
+            and prev_tokens < MERGE_THRESHOLD
+            and prev_tokens + curr_tokens <= TOKEN_LIMIT
         ):
             prev = merged[-1]
             prev["content"] = prev["content"] + "\n" + chunk["content"]
             prev["end_line"] = chunk["end_line"]
-            # A merged chunk covers multiple symbols — drop the individual name
-            prev["symbol_name"] = None
+            if prev["symbol_name"] and chunk["symbol_name"] and prev["symbol_name"] != chunk["symbol_name"]:
+                prev["symbol_name"] = None
+            else:
+                prev["symbol_name"] = prev["symbol_name"] or chunk["symbol_name"]
         else:
             merged.append(chunk)
 

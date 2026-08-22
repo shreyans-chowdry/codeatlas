@@ -14,6 +14,7 @@ from unittest.mock import patch, MagicMock
 
 import pytest
 
+from backend.app.db.models import DependencyEdge
 from backend.app.retrieval.hybrid_rank import merge_and_rerank
 from backend.app.retrieval.graph_expand import expand_with_dependencies
 

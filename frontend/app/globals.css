@@ -1,44 +1,140 @@
 @import "tailwindcss";
 
-@theme {
-  --color-background: #09090b; /* Zinc 950 */
-  --color-foreground: #fafafa; /* Zinc 50 */
-  --color-muted: #27272a;      /* Zinc 800 */
-  --color-muted-foreground: #a1a1aa; /* Zinc 400 */
-  --color-border: #27272a;     /* Zinc 800 */
-  --color-primary: #3b82f6;    /* Blue 500 */
-  --color-primary-foreground: #ffffff;
+/* `dark:` utilities follow the theme picked in the UI (data-theme on <html>), not just the OS */
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+
+/* Semantic design tokens. Components only use these names, so both themes stay consistent. */
+@theme inline {
+  --color-background: var(--ca-background);
+  --color-surface: var(--ca-surface);
+  --color-foreground: var(--ca-foreground);
+  --color-muted: var(--ca-muted);
+  --color-muted-foreground: var(--ca-muted-foreground);
+  --color-border: var(--ca-border);
+  --color-primary: var(--ca-primary);
+  --color-primary-foreground: var(--ca-primary-foreground);
+  --color-danger: var(--ca-danger);
+  --color-success: var(--ca-success);
+  --color-warning: var(--ca-warning);
+  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
-:root {
-  background-color: var(--color-background);
-  color: var(--color-foreground);
+/* Light */
+:root,
+:root[data-theme="light"] {
+  --ca-background: #f6f6f8;
+  --ca-surface: #ffffff;
+  --ca-foreground: #18181b;
+  --ca-muted: #ededf0;
+  --ca-muted-foreground: #66666e;
+  --ca-border: #e2e2e7;
+  --ca-primary: #2563eb;
+  --ca-primary-foreground: #ffffff;
+  --ca-danger: #c42b2b;
+  --ca-success: #15803d;
+  --ca-warning: #a16207;
+  --ca-scrollbar: #d4d4d8;
+  --ca-scrollbar-hover: #a1a1aa;
+  color-scheme: light;
+}
+
+/* Dark */
+:root[data-theme="dark"] {
+  --ca-background: #09090b;
+  --ca-surface: #111114;
+  --ca-foreground: #fafafa;
+  --ca-muted: #27272a;
+  --ca-muted-foreground: #a1a1aa;
+  --ca-border: #27272a;
+  --ca-primary: #3b82f6;
+  --ca-primary-foreground: #ffffff;
+  --ca-danger: #f87171;
+  --ca-success: #22c55e;
+  --ca-warning: #fbbf24;
+  --ca-scrollbar: #27272a;
+  --ca-scrollbar-hover: #52525b;
   color-scheme: dark;
 }
 
+/* No saved choice and JS hasn't run yet: follow the OS */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme]) {
+    --ca-background: #09090b;
+    --ca-surface: #111114;
+    --ca-foreground: #fafafa;
+    --ca-muted: #27272a;
+    --ca-muted-foreground: #a1a1aa;
+    --ca-border: #27272a;
+    --ca-primary: #3b82f6;
+    --ca-danger: #f87171;
+    --ca-success: #22c55e;
+    --ca-warning: #fbbf24;
+    color-scheme: dark;
+  }
+}
+
+html,
 body {
-  font-family: ui-sans-serif, system-ui, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
+  background-color: var(--ca-background);
+  color: var(--ca-foreground);
+}
+
+body {
   margin: 0;
   padding: 0;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
 
-/* Custom scrollbar for a premium feel */
+/* Smooth color changes on hover etc., but switch themes instantly */
+.theme-switching *,
+.theme-switching *::before,
+.theme-switching *::after {
+  transition: none !important;
+}
+
+:focus-visible {
+  outline: 2px solid var(--ca-primary);
+  outline-offset: 2px;
+}
+
+/* Scrollbars */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--ca-scrollbar) transparent;
+}
 ::-webkit-scrollbar {
   width: 8px;
   height: 8px;
 }
-
 ::-webkit-scrollbar-track {
   background: transparent;
 }
-
 ::-webkit-scrollbar-thumb {
-  background: var(--color-muted);
+  background: var(--ca-scrollbar);
   border-radius: 4px;
 }
-
 ::-webkit-scrollbar-thumb:hover {
-  background: var(--color-muted-foreground);
+  background: var(--ca-scrollbar-hover);
+}
+
+/* React Flow: blend controls and attribution into both themes */
+.react-flow {
+  --xy-background-color: transparent;
+  --xy-controls-button-background-color: var(--ca-surface);
+  --xy-controls-button-background-color-hover: var(--ca-muted);
+  --xy-controls-button-color: var(--ca-foreground);
+  --xy-controls-button-color-hover: var(--ca-foreground);
+  --xy-controls-button-border-color: var(--ca-border);
+  --xy-attribution-background-color: transparent;
+}
+.react-flow__controls {
+  border: 1px solid var(--ca-border);
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: none;
+}
+.react-flow__attribution a {
+  color: var(--ca-muted-foreground);
 }

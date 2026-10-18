@@ -9,8 +9,11 @@ POST /repos/{repo_id}/chat
 """
 import json
 import logging
+import os
 import uuid
 from typing import AsyncGenerator
+
+from fastapi.concurrency import run_in_threadpool
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from fastapi.responses import StreamingResponse
@@ -73,11 +76,31 @@ def _persist_assistant_message(repo_id: uuid.UUID, accumulated: list[str]) -> No
         logger.error(f"Failed to persist assistant ChatMessage for repo {repo_id}: {exc}")
 
 
+def _sources_payload(chunks: list[dict]) -> list[dict]:
+    """Compact list of the retrieved code locations, sent to the UI before the answer."""
+    seen = set()
+    sources = []
+    for c in chunks:
+        key = (c["file_id"], c["start_line"], c["end_line"])
+        if key in seen:
+            continue
+        seen.add(key)
+        sources.append({
+            "file_id": c["file_id"],
+            "path": c.get("file_path", "unknown"),
+            "start_line": c["start_line"],
+            "end_line": c["end_line"],
+            "symbol_name": c.get("symbol_name"),
+        })
+    return sources
+
+
 async def _generate_sse_stream(
     repo_id: uuid.UUID,
     question: str,
     chunks: list[dict],
     accumulated: list[str],
+    history: list[dict] | None = None,
 ) -> AsyncGenerator[str, None]:
     """
     Streams Claude's response token-by-token as SSE events.
@@ -85,8 +108,9 @@ async def _generate_sse_stream(
     BackgroundTask can persist it after the stream ends — even if the
     client disconnects before the stream completes.
     """
+    yield f"data: {json.dumps({'type': 'sources', 'sources': _sources_payload(chunks)})}\n\n"
     try:
-        async for text_delta in stream_answer(question, chunks):
+        async for text_delta in stream_answer(question, chunks, history=history):
             accumulated.append(text_delta)
             # SSE format: "data: <payload>\n\n"
             payload = json.dumps({"type": "delta", "text": text_delta})
@@ -97,7 +121,7 @@ async def _generate_sse_stream(
 
     except Exception as exc:
         logger.exception(f"Error streaming Claude response for repo {repo_id}: {exc}")
-        error_payload = json.dumps({"type": "error", "message": "An error occurred while generating the response."})
+        error_payload = json.dumps({"type": "error", "message": f"LLM request failed: {exc}"})
         yield f"data: {error_payload}\n\n"
 
 
@@ -139,6 +163,23 @@ async def chat(
     if not question:
         raise HTTPException(status_code=400, detail="Question must not be empty.")
 
+    # Recent conversation (before this question) so follow-ups like "and where is it called?" work
+    try:
+        prior = (
+            db.query(ChatMessage)
+            .filter(ChatMessage.repo_id == repo_id)
+            .order_by(ChatMessage.created_at.desc())
+            .limit(6)
+            .all()
+        )
+        history = [
+            {"role": m.role, "content": m.content}
+            for m in reversed(prior)
+            if isinstance(getattr(m, "content", None), str) and m.role in ("user", "assistant")
+        ]
+    except Exception:
+        history = []
+
     # Persist user message immediately (before streaming starts)
     user_msg = ChatMessage(
         repo_id=repo_id,
@@ -160,12 +201,19 @@ async def chat(
             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
         )
 
-    # Run synchronous retrieval (runs Voyage AI + DB queries in thread pool internally)
+    if not os.getenv("ANTHROPIC_API_KEY"):
+        return StreamingResponse(
+            _no_context_sse_stream("ANTHROPIC_API_KEY is not set on the backend. Add it to your .env file and restart the server."),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        )
+
+    # Retrieval is synchronous (Voyage AI + DB), so run it off the event loop
     try:
-        raw_chunks = retrieve(str(repo_id), question)
+        raw_chunks = await run_in_threadpool(retrieve, str(repo_id), question)
     except Exception as exc:
         logger.exception(f"Retrieval failed for repo {repo_id}: {exc}")
-        raise HTTPException(status_code=500, detail="Retrieval failed. Please try again.")
+        raise HTTPException(status_code=500, detail=f"Retrieval failed: {exc}")
 
     # Guard: zero chunks means we have no context to ground the answer
     if not raw_chunks:
@@ -190,7 +238,7 @@ async def chat(
     background_tasks.add_task(_persist_assistant_message, repo_id, accumulated)
 
     return StreamingResponse(
-        _generate_sse_stream(repo_id, question, chunks, accumulated),
+        _generate_sse_stream(repo_id, question, chunks, accumulated, history),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )

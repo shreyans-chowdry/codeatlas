@@ -12,9 +12,8 @@ import anthropic
 
 logger = logging.getLogger(__name__)
 
-# Model to use — claude-3-5-sonnet is the recommended balance of capability/speed.
-# Override via CLAUDE_MODEL env var if needed.
-CLAUDE_MODEL = os.getenv("CLAUDE_MODEL", "claude-3-5-sonnet-20241022")
+# Model to use. Override via CLAUDE_MODEL env var (any current Claude model id works).
+CLAUDE_MODEL = os.getenv("CLAUDE_MODEL", "claude-sonnet-5-5")
 
 SYSTEM_PROMPT = """\
 You are CodeAtlas AI, an expert code-understanding assistant.
@@ -81,7 +80,11 @@ def build_prompt(question: str, chunks: list[dict]) -> str:
     return "\n".join(lines)
 
 
-async def stream_answer(question: str, chunks: list[dict]) -> AsyncGenerator[str, None]:
+async def stream_answer(
+    question: str,
+    chunks: list[dict],
+    history: list[dict] | None = None,
+) -> AsyncGenerator[str, None]:
     """
     Calls the Anthropic Claude API with streaming enabled.
     Yields text deltas as they arrive from the API.
@@ -94,11 +97,28 @@ async def stream_answer(question: str, chunks: list[dict]) -> AsyncGenerator[str
 
     client = anthropic.AsyncAnthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
 
+    # Prior turns (plain text, no code context) give follow-up questions continuity.
+    # The API requires alternating roles starting with "user", so normalise first.
+    messages: list[dict] = []
+    for turn in history or []:
+        role, content = turn.get("role"), (turn.get("content") or "").strip()
+        if role not in ("user", "assistant") or not content:
+            continue
+        if not messages and role != "user":
+            continue
+        if messages and messages[-1]["role"] == role:
+            messages[-1]["content"] += "\n\n" + content
+        else:
+            messages.append({"role": role, "content": content})
+    if messages and messages[-1]["role"] == "user":
+        messages.pop()  # unanswered question (e.g. stream was interrupted)
+    messages.append({"role": "user", "content": user_content})
+
     async with client.messages.stream(
         model=CLAUDE_MODEL,
         max_tokens=4096,
         system=SYSTEM_PROMPT,
-        messages=[{"role": "user", "content": user_content}],
+        messages=messages,
     ) as stream:
         async for text_delta in stream.text_stream:
             yield text_delta

@@ -1,26 +1,47 @@
-version: '3.8'
-
 services:
+  # Local Postgres with pgvector. Remove this service (and depends_on) if you use Supabase/Neon
+  # and point DATABASE_URL in .env at that instead.
+  db:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: codeatlas
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 3s
+      retries: 20
+
   backend:
     build:
-      context: ./backend
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: backend/Dockerfile
     ports:
       - "8000:8000"
     env_file:
       - .env
     environment:
-      - DATABASE_URL=${DATABASE_URL}
-      - VOYAGE_API_KEY=${VOYAGE_API_KEY}
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      # Inside Docker, "localhost" is the container itself, so default to the db service.
+      - DATABASE_URL=${DOCKER_DATABASE_URL:-postgresql://postgres:postgres@db:5432/codeatlas}
+    depends_on:
+      db:
+        condition: service_healthy
 
   frontend:
     build:
       context: ./frontend
       dockerfile: Dockerfile
+      args:
+        # Baked into the browser bundle at build time
+        NEXT_PUBLIC_API_URL: http://localhost:8000
     ports:
       - "3000:3000"
-    environment:
-      - NEXT_PUBLIC_API_URL=http://localhost:8000
     depends_on:
       - backend
+
+volumes:
+  pgdata:

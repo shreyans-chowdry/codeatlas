@@ -1,6 +1,8 @@
+# Build context is the PROJECT ROOT (see docker-compose.yml) so the
+# `backend` package path used in imports (backend.app...) exists in the image.
 FROM python:3.12-slim
 
-# Install git and build essentials needed for tree-sitter & C extensions
+# git is needed to clone repos; build-essential for any C extensions
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     build-essential \
@@ -8,16 +10,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-# Copy requirements and install
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+COPY backend/requirements.txt ./backend/requirements.txt
+RUN pip install --no-cache-dir -r backend/requirements.txt
 
-# Copy backend source code
-COPY . .
+COPY backend ./backend
 
-# Set PYTHONPATH to include project root so imports work cleanly
 ENV PYTHONPATH=/app
-
 EXPOSE 8000
 
 CMD ["uvicorn", "backend.main:app", "--host", "0.0.0.0", "--port", "8000"]

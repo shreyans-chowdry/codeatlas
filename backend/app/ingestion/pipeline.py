@@ -46,11 +46,15 @@ def ingest_repo(github_url: str, repo_id: str):
         repo = db.query(Repo).filter(Repo.id == repo_uuid).first()
         if repo:
             repo.status = RepoStatus.ingesting
+            repo.error_message = None
             db.commit()
 
     temp_dir = tempfile.mkdtemp(prefix=f"repo_{repo_uuid}_")
 
     try:
+        if not os.getenv("VOYAGE_API_KEY"):
+            raise RuntimeError("VOYAGE_API_KEY is not set on the backend, so embeddings cannot be generated.")
+
         # Step 1: Clone repository
         logger.info(f"Cloning {github_url} into {temp_dir}...")
         clone_repo(github_url, temp_dir)
@@ -80,7 +84,7 @@ def ingest_repo(github_url: str, repo_id: str):
 
             try:
                 with open(abs_path, "r", encoding="utf-8", errors="replace") as f:
-                    content = f.read()
+                    content = f.read().replace("\x00", "")  # Postgres TEXT rejects NUL bytes
             except Exception as read_err:
                 logger.warning(f"Failed to read file {rel_path}: {read_err}")
                 continue
@@ -114,7 +118,8 @@ def ingest_repo(github_url: str, repo_id: str):
                     id=f["id"],
                     repo_id=repo_uuid,
                     path=f["path"],
-                    language=f["language"]
+                    language=f["language"],
+                    content=f["content"],
                 )
                 for f in files_data
             ]
@@ -171,6 +176,7 @@ def ingest_repo(github_url: str, repo_id: str):
                 repo = db.query(Repo).filter(Repo.id == repo_uuid).first()
                 if repo:
                     repo.status = RepoStatus.failed
+                    repo.error_message = str(e)[:1000]
                     db.commit()
         except Exception as db_err:
             logger.error(f"Failed to update repo status to failed: {db_err}")

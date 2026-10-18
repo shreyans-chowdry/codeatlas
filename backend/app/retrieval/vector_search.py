@@ -31,11 +31,11 @@ def vector_search(repo_id: str, query_embedding: list[float], top_k: int = 15) -
             start_line,
             end_line,
             content,
-            1 - (embedding <=> :embedding::vector) AS score
+            1 - (embedding <=> CAST(:embedding AS vector)) AS score
         FROM chunks
         WHERE repo_id = :repo_id
           AND embedding IS NOT NULL
-        ORDER BY embedding <=> :embedding::vector ASC
+        ORDER BY embedding <=> CAST(:embedding AS vector) ASC
         LIMIT :top_k
     """)
 

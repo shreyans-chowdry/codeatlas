@@ -18,35 +18,60 @@ CodeAtlas AI is a retrieval-augmented platform for natural-language exploration 
 
 ## Quickstart & Setup Instructions
 
-### Prerequisites
-- [Docker & Docker Compose](https://docs.docker.com/get-docker/)
-- Account API Keys for:
-  - **[Voyage AI](https://www.voyageai.com/)** (for `voyage-code-3` code embeddings)
-  - **[Anthropic](https://www.anthropic.com/)** (for `claude-3-5-sonnet` RAG answers)
-  - **[Supabase / Postgres](https://supabase.com/)** (PostgreSQL instance with `pgvector` extension enabled)
+### What you need
+| Thing | Required? | Where to get it |
+|---|---|---|
+| `VOYAGE_API_KEY` | ✅ | [dashboard.voyageai.com](https://dashboard.voyageai.com/) → API keys (code embeddings, `voyage-code-3`) |
+| `ANTHROPIC_API_KEY` | ✅ | [console.anthropic.com](https://console.anthropic.com/) → API keys (Claude answers) |
+| `DATABASE_URL` | ✅ | Postgres with `pgvector` — Supabase (free tier works) **or** the local Docker DB below |
+| `GITHUB_TOKEN` | optional | Only for private repos / higher clone rate limits |
 
-### Running with Docker Compose
+The backend creates the tables, `vector` extension and indexes automatically on startup — no SQL to run by hand.
 
-1. **Clone the repository:**
-   ```bash
-   git clone https://github.com/your-user/codeatlas.git
-   cd codeatlas
-   ```
+### Option A — run locally (recommended for development)
 
-2. **Configure Environment Variables:**
-   Copy `.env.example` to `.env` and fill in your connection strings and API keys:
-   ```bash
-   cp .env.example .env
-   ```
+```bash
+cp .env.example .env            # then paste your keys + DATABASE_URL into .env
 
-3. **Start the Platform:**
-   ```bash
-   docker compose up --build
-   ```
+# Backend (from the project root)
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r backend/requirements.txt
+uvicorn backend.main:app --reload --port 8000
 
-4. **Access the Web App:**
-   - **Frontend:** `http://localhost:3000`
-   - **FastAPI Backend Docs:** `http://localhost:8000/docs`
+# Frontend (second terminal)
+cd frontend
+npm install
+npm run dev                     # http://localhost:3000
+```
+
+No Postgres yet? Start just the database with Docker: `docker compose up db` and use
+`DATABASE_URL=postgresql://postgres:postgres@localhost:5432/codeatlas`.
+
+Check `http://localhost:8000/health` — it reports whether the DB is reachable and which keys are set
+(the home screen shows the same warning banner if anything is missing).
+
+### Option B — everything in Docker
+
+```bash
+cp .env.example .env            # add VOYAGE_API_KEY + ANTHROPIC_API_KEY
+docker compose up --build
+```
+- **Frontend:** `http://localhost:3000`
+- **API docs:** `http://localhost:8000/docs`
+
+Compose runs its own pgvector Postgres. To use Supabase instead, set `DOCKER_DATABASE_URL` in `.env`.
+
+### API surface
+| Method | Path | Purpose |
+|---|---|---|
+| `POST` | `/repos` | Start ingestion `{github_url, force?}` (re-uses an existing index unless `force`) |
+| `GET` | `/repos` | List indexed repos |
+| `GET` | `/repos/{id}/status` | Ingestion status + failure reason |
+| `DELETE` | `/repos/{id}` | Delete a repo's index |
+| `GET` | `/repos/{id}/graph` | Files + import edges |
+| `GET` | `/repos/{id}/files/{file_id}` | Full file source (file viewer / citations) |
+| `POST` | `/repos/{id}/chat` | SSE stream: `sources` → `delta`… → `done` |
+| `GET`/`DELETE` | `/repos/{id}/messages` | Chat history |
 
 ---
 

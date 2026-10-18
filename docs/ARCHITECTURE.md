@@ -32,7 +32,7 @@ CodeAtlas AI is a retrieval-augmented generation (RAG) platform designed specifi
         │
         ▼
 [LLM Streaming Engine] (claude_client.py)
-  └── Grounded Citation Prompt → Claude 3.5 Sonnet → FastAPI SSE Stream
+  └── Grounded Citation Prompt → Claude → FastAPI SSE Stream
 ```
 
 ---

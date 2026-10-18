@@ -48,6 +48,8 @@ def test_post_repos_valid_url(mock_db):
             obj.id = uuid.uuid4()
 
     mock_db.add.side_effect = mock_add
+    # No previously-indexed copy of this repo exists
+    mock_db.query.return_value.filter.return_value.order_by.return_value.first.return_value = None
     
     with patch("backend.app.routers.repos.BackgroundTasks.add_task") as mock_add_task:
         response = client.post("/repos/", json={"github_url": "https://github.com/tiangolo/fastapi"})
@@ -138,3 +140,26 @@ def test_post_chat_unready_repo_guard(mock_db):
     stream_text = response.text
     assert 'data: {"type": "delta", "text": "This repository is currently in \'pending\' status' in stream_text
     assert 'data: {"type": "done"}' in stream_text
+
+
+@pytest.mark.parametrize("raw", [
+    "https://github.com/pallets/flask",
+    "github.com/pallets/flask",
+    "https://github.com/pallets/flask.git",
+    "https://github.com/pallets/flask/",
+    "https://github.com/pallets/flask/tree/main/src",
+])
+def test_github_url_normalization(raw):
+    from backend.app.routers.repos import normalize_github_url
+    assert normalize_github_url(raw) == ("https://github.com/pallets/flask", "pallets/flask")
+
+
+def test_reuses_existing_index(mock_db):
+    """Submitting a URL that is already indexed returns the existing repo instead of re-ingesting."""
+    existing = Repo(id=uuid.uuid4(), github_url="https://github.com/pallets/flask", name="pallets/flask", status=RepoStatus.ready)
+    mock_db.query.return_value.filter.return_value.order_by.return_value.first.return_value = existing
+    with patch("backend.app.routers.repos.BackgroundTasks.add_task") as mock_add_task:
+        res = client.post("/repos", json={"github_url": "https://github.com/pallets/flask.git"})
+    assert res.status_code == 200
+    assert res.json() == {"repo_id": str(existing.id), "status": "ready", "reused": True}
+    assert not mock_add_task.called
